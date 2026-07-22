@@ -96,6 +96,7 @@
   .cp-extra-row{display:flex;gap:10px;padding:0 16px 14px;}
   .cp-extra-btn{flex:1 1 auto;height:44px;border-radius:12px;border:1px solid var(--line);
     background:var(--pad-hi);color:var(--text);font:inherit;font-size:13px;font-weight:800;cursor:pointer;}
+  .cp-extra-btn.danger{border-color:rgba(232,64,64,.4);background:rgba(232,64,64,.14);color:#ff8a8a;}
   .cp-extra-btn:active{transform:translateY(1px);}
   .cp-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
     padding:12px 16px;margin:0 16px 14px;background:var(--pad);border:1px solid var(--line);
@@ -380,7 +381,7 @@
   <div class="grid" id="grid"></div>
 </main>
 
-<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.3</span></footer>
+<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.4</span></footer>
 
 <input type="file" id="filein" accept="audio/*,.mp3,.m4a,.ogg,.wav,.aac,.flac" multiple>
 
@@ -421,6 +422,9 @@
   <div class="cp-extra-row">
     <button class="cp-extra-btn" id="cpWinnerBtn">🏆 Győztes!</button>
     <button class="cp-extra-btn" id="cpStopSoundsBtn">🔇 Hangeffektek állj</button>
+  </div>
+  <div class="cp-extra-row">
+    <button class="cp-extra-btn danger" id="cpClearRobberyBtn">🧹 Rablás-sor törlése</button>
   </div>
   <div class="cp-toggle-row">
     <span>Rablás letiltása <span class="cp-lip-hint">— vészhelyzeti kikapcsoló, ha a Rabló App beragad</span></span>
@@ -865,6 +869,17 @@ document.getElementById("cpWinnerBtn").addEventListener("click", ()=>{
 document.getElementById("cpStopSoundsBtn").addEventListener("click", ()=>{
   if(!fbDB) return;
   fbDB.ref("activityControl/stopSoundsSignal").set(Date.now());
+});
+
+/* Rablás-sor törlése - azonnal kiüríti a jelenlegi (akár beragadt) rablás-
+   állapotot, DE nem tiltja le a rablást a jövőre nézve (arra ott a fenti
+   kapcsoló). Akkor kell, ha pl. induláskor rögtön több rablás-jelentkezés
+   jelenik meg, mielőtt bárki nyomott volna bármit. */
+document.getElementById("cpClearRobberyBtn").addEventListener("click", ()=>{
+  if(!fbDB) return;
+  if(!confirm("Törlöd a jelenlegi rablás-sort? Ha épp van élő rablás-próbálkozás, az megszakad.")) return;
+  fbDB.ref("activityRobbery").set({ queue: null, currentIndex: -1, phase: "collecting" });
+  pushLog("🧹 Rablás-sor manuálisan törölve (GM App)");
 });
 
 /* Rablás letiltása - vészhelyzeti kikapcsoló, ha a Rabló App/jelzései beragadnak. */
