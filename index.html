@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>GM App</title>
+<!-- Activity Centrum: ugyanaz a Firebase SDK, mint a Scoreboardban -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<style>
+  :root{
+    --bg:#0B0E14; --panel:#151A24; --pad:#1C2230; --pad-hi:#242c3d;
+    --line:rgba(255,255,255,.09); --text:#F5F7FA; --muted:#8B94A7;
+    --hot:#FFC93C; --hot2:#FFA000; --loop:#4ee6ff; --green:#5fd08a;
+    --ease-spring:cubic-bezier(.34,1.56,.64,1); --ease-out:cubic-bezier(.16,1,.3,1);
+  }
+  /* ---- Ambient glow háttérréteg ---- */
+  #ambient{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+  #ambient span{position:absolute;border-radius:50%;opacity:.22;will-change:transform}
+  #ambient span:nth-child(1){width:40vmax;height:40vmax;left:-14vmax;top:-16vmax;background:radial-gradient(circle,var(--hot2),transparent 68%);animation:amb1 28s ease-in-out infinite}
+  #ambient span:nth-child(2){width:34vmax;height:34vmax;right:-12vmax;bottom:-14vmax;background:radial-gradient(circle,#6C4CD6,transparent 68%);opacity:.14;animation:amb2 34s ease-in-out infinite}
+  @keyframes amb1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(6vmax,7vmax) scale(1.1)}}
+  @keyframes amb2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-6vmax,5vmax) scale(1.08)}}
+  @media (prefers-reduced-motion: reduce){ #ambient span{animation:none!important} }
+
+  /* ===== Esemény-napló panel ===== */
+  #logPanel{position:fixed;inset:0;z-index:2500;background:rgba(10,8,7,.97);backdrop-filter:blur(8px);display:none;flex-direction:column}
+  #logPanel.open{display:flex}
+  .log-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .log-head h2{margin:0;font-size:15px;letter-spacing:.1em;text-transform:uppercase}
+  .log-close{background:var(--pad);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:9px 16px;font-size:13px;cursor:pointer}
+  #logList{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column-reverse;gap:6px}
+  .log-item{display:flex;gap:10px;font-size:13px;padding:8px 10px;border-radius:8px;background:var(--pad);border:1px solid var(--line)}
+  .log-item .log-time{color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+  .log-empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:13px}
+
+  /* ===== Új játék / Folytatás kezdőkapu ===== */
+  #startup-gate{position:fixed;inset:0;z-index:3000;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:24px}
+  .sg-logo{font-size:26px;font-weight:900;letter-spacing:.08em;color:var(--hot)}
+  .sg-buttons{display:flex;flex-direction:column;gap:14px;width:min(84vw,340px)}
+  .sg-buttons button{padding:20px;border-radius:16px;border:none;font-size:18px;font-weight:800;cursor:pointer;font-family:inherit}
+  #sg-new{background:linear-gradient(135deg,#ff6b5c,#e84040);color:#fff}
+  #sg-continue{background:var(--pad);color:var(--text);border:1px solid var(--line)}
+  .sg-intro-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .sg-intro-row button{background:var(--pad);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 10px;font-size:11px;cursor:pointer}
+
+  /* ===== Intro overlay (új játék indításakor) ===== */
+  #intro-overlay{position:fixed;inset:0;z-index:3100;background:var(--bg);display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;pointer-events:none}
+  #intro-overlay.show{display:flex;animation:introFadeOut 2.4s ease forwards}
+  .intro-logo{font-size:60px;animation:introPop .6s var(--ease-spring)}
+  .intro-title{font-size:30px;font-weight:900;letter-spacing:.2em;color:var(--hot);opacity:0;animation:introTitleIn .5s ease .3s forwards}
+  @keyframes introPop{0%{transform:scale(.3);opacity:0}100%{transform:scale(1);opacity:1}}
+  @keyframes introTitleIn{to{opacity:1}}
+  @keyframes introFadeOut{0%,72%{opacity:1}100%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){ #intro-overlay.show{animation:none} }
+  /* ---- Vezérlő (scoreboard távvezérlő) ---- */
+  .iconbtn.ctrl{border-color:#5a7d9a;color:#bfe0ff;}
+  #ctrlPanel{position:fixed;inset:0;z-index:1000;background:rgba(10,8,7,.97);
+    backdrop-filter:blur(8px);display:none;flex-direction:column;}
+  #ctrlPanel.open{display:flex;}
+  .cp-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+    padding:14px 16px;border-bottom:1px solid var(--line);background:var(--panel);}
+  .cp-head h2{margin:0;font-size:15px;letter-spacing:.16em;text-transform:uppercase;}
+  .cp-close{background:var(--pad);border:1px solid var(--line);color:var(--text);
+    font:inherit;font-size:14px;padding:8px 14px;border-radius:10px;cursor:pointer;}
+  .cp-close:active{background:var(--pad-hi);transform:translateY(1px);}
+  /* kiválasztott feladvány + START */
+  .cp-sel{padding:14px 16px;border-bottom:1px solid var(--line);}
+  .cp-sel .lbl{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);}
+  .cp-sel .word{font-size:22px;font-weight:800;margin-top:4px;word-break:break-word;}
+  .cp-sel .meta{font-size:12px;color:var(--muted);margin-top:3px;}
+  .cp-start{margin:14px 16px;flex:0 0 auto;width:calc(100% - 32px);
+    padding:18px;border-radius:14px;border:none;cursor:pointer;
+    font:inherit;font-size:18px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+    background:linear-gradient(180deg,#2e7d4f,#1f5e3a);color:#eafff2;
+    box-shadow:0 6px 18px rgba(40,160,90,.35);transition:transform .1s,opacity .2s;}
+  .cp-start:active{transform:translateY(2px);}
+  .cp-start.disabled{background:#1C2230;color:var(--muted);box-shadow:none;cursor:default;
+    opacity:.6;pointer-events:none;}
+  .cp-start.running{background:linear-gradient(180deg,#7d5a2e,#5e431f);color:#ffe9c9;}
+  /* szájról olvasás hang */
+  .cp-lip{padding:12px 16px;border-bottom:1px solid var(--line);}
+  .cp-lip .lbl{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);}
+  .cp-lip-hint{letter-spacing:0;text-transform:none;opacity:.7;}
+  .cp-lip-row{display:flex;gap:7px;margin-top:9px;}
+  .cp-lip-btn{flex:1 1 auto;background:var(--pad);border:1px solid var(--line);color:var(--text);
+    font:inherit;font-size:12px;padding:9px 8px;border-radius:10px;cursor:pointer;white-space:nowrap;}
+  .cp-lip-btn:active{background:var(--pad-hi);transform:translateY(1px);}
+  .cp-lip-btn.test{flex:0 0 auto;color:#5fd08a;}
+  .cp-lip-btn.del{flex:0 0 auto;color:#ff7a5c;width:42px;}
+  .cp-lip-name{margin-top:8px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cp-lip-name.set{color:#5fd08a;}
+
+  /* csapatlista */
+  .cp-teams{flex:1 1 auto;overflow-y:auto;padding:6px 16px 20px;}  .cp-empty{color:var(--muted);font-size:13px;text-align:center;padding:30px 10px;line-height:1.6;}
+  .cp-team{display:flex;align-items:center;gap:12px;padding:11px 12px;margin:8px 0;
+    background:var(--pad);border:1px solid var(--line);border-radius:13px;border-left-width:5px;}
+  .cp-team.onturn{box-shadow:0 0 0 1px #FFC93C inset;}
+  .cp-team .nm{flex:1 1 auto;min-width:0;font-size:15px;font-weight:700;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cp-team .turn-tag{font-size:9px;letter-spacing:.12em;color:#FFC93C;text-transform:uppercase;
+    border:1px solid #FFC93C66;border-radius:6px;padding:2px 5px;margin-left:6px;}
+  .cp-team .sc{font-size:24px;font-weight:800;min-width:46px;text-align:right;
+    font-variant-numeric:tabular-nums;}
+  .cp-pm{display:flex;gap:7px;}
+  .cp-pm button{width:46px;height:46px;border-radius:11px;border:1px solid var(--line);
+    background:var(--pad-hi);color:var(--text);font:inherit;font-size:24px;font-weight:800;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;}
+  .cp-pm button:active{transform:translateY(1px);}
+  .cp-pm .minus{color:#ff7a5c;}
+
+  /* ===== RABLÁS képernyő ===== */
+  #cpRobbery{
+    display:none;position:absolute;inset:0;z-index:10;
+    flex-direction:column;align-items:center;justify-content:center;gap:14px;
+    background:radial-gradient(ellipse at 50% 40%,rgba(232,64,64,.22),rgba(10,8,7,.97) 70%);
+    padding:24px;text-align:center;
+  }
+  #cpRobbery.show{display:flex;}
+  .rob-eyebrow{font-size:13px;letter-spacing:.4em;text-transform:uppercase;color:#ff7a5c;font-weight:800;}
+  .rob-team{font-size:30px;font-weight:800;color:var(--text);word-break:break-word;}
+  .rob-hint{font-size:13px;color:var(--muted);}
+  .rob-btns{display:flex;gap:12px;margin-top:10px;width:100%;max-width:420px;}
+  .rob-btn{flex:1 1 auto;padding:20px 12px;border-radius:14px;border:none;cursor:pointer;
+    font:inherit;font-size:16px;font-weight:800;letter-spacing:.04em;}
+  .rob-btn:active{transform:translateY(2px);}
+  .rob-btn.yes{background:linear-gradient(180deg,#2e7d4f,#1f5e3a);color:#eafff2;}
+  .rob-btn.no{background:linear-gradient(180deg,#7d2e2e,#5e1f1f);color:#ffeaea;}
+  .cp-pm .plus{color:#5fd08a;}
+
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    display:flex;flex-direction:column;overscroll-behavior:none;
+  }
+
+  /* ---- Top bar ---- */
+  header{position:relative;z-index:1;flex:0 0 auto;padding:12px 14px 10px;
+    background:linear-gradient(180deg,var(--panel),#0d1017);border-bottom:1px solid var(--line);}
+  .titlerow{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .brand{display:flex;align-items:baseline;gap:9px;}
+  .brand h1{margin:0;font-size:18px;letter-spacing:.18em;font-weight:800;text-transform:uppercase;}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--hot);
+    box-shadow:0 0 10px var(--hot);align-self:center;}
+  .brand small{color:var(--muted);font-size:10px;letter-spacing:.12em;}
+
+  .barbtns{display:flex;gap:8px;}
+  .iconbtn{background:var(--pad);border:1px solid var(--line);color:var(--text);
+    font:inherit;font-size:12px;letter-spacing:.04em;padding:8px 11px;border-radius:10px;
+    cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;}
+  .iconbtn:active{background:var(--pad-hi);transform:translateY(1px);}
+  .iconbtn.on{border-color:var(--loop);color:var(--loop);}
+  .iconbtn.stop{border-color:rgba(232,64,64,.4);color:#ff7a5c;}
+
+  .vol{display:flex;align-items:center;gap:10px;margin-top:11px;}
+  .vol span{font-size:10px;color:var(--muted);letter-spacing:.1em;min-width:32px;}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;
+    background:var(--line);outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+    background:var(--text);border:3px solid var(--bg);cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--text);
+    border:3px solid var(--bg);cursor:pointer;}
+
+  .ctrlrow{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;}
+
+  /* ---- Folder bar ---- */
+  .folderbar{display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:2px;}
+  .folderbar::-webkit-scrollbar{display:none;}
+  .chip{flex:0 0 auto;background:var(--pad);border:1px solid var(--line);color:var(--muted);
+    font:inherit;font-size:12px;padding:7px 13px;border-radius:999px;cursor:pointer;white-space:nowrap;}
+  .chip.active{color:var(--text);border-color:var(--text);background:var(--pad-hi);}
+  .chip i{font-style:normal;opacity:.5;margin-left:5px;font-size:10px;}
+  .chip.add{border-style:dashed;}
+
+  .ftools{display:none;gap:8px;margin-top:9px;}
+  body.editing:not(.folder-all) .ftools{display:flex;}
+
+  /* ---- Pad grid ---- */
+  main{position:relative;z-index:1;flex:1 1 auto;overflow-y:auto;padding:12px;-webkit-overflow-scrolling:touch;}
+  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));}
+  .pad{position:relative;aspect-ratio:1/1;border-radius:14px;
+    background:linear-gradient(160deg,var(--pad-hi),var(--pad));border:1px solid var(--line);
+    box-shadow:0 4px 0 #0d0b09, inset 0 1px 0 rgba(255,255,255,.04);
+    cursor:pointer;user-select:none;display:flex;flex-direction:column;justify-content:flex-end;
+    padding:10px;transition:transform .04s,box-shadow .04s;overflow:hidden;
+    opacity:0;transform:scale(.85);animation:pad-in .4s var(--ease-out) both;
+    animation-delay:calc(var(--i,0) * 28ms)}
+  @keyframes pad-in{to{opacity:1;transform:scale(1)}}
+  @media (prefers-reduced-motion: reduce){ .pad{animation:none;opacity:1;transform:none} }
+  .pad:active{transform:translateY(3px);box-shadow:0 1px 0 #0d0b09;}
+  .pad.playing{border-color:var(--hot);
+    box-shadow:0 4px 0 #0d0b09, inset 0 0 28px rgba(255,201,60,.28),0 0 20px rgba(255,201,60,.25);}
+  .pad .name{font-size:13px;line-height:1.2;word-break:break-word;font-weight:600;}
+  .pad .meta{font-size:8px;color:var(--muted);letter-spacing:.1em;margin-top:4px;text-transform:uppercase;}
+  .pad .bar{position:absolute;left:0;bottom:0;height:3px;width:0;background:var(--hot);transition:width .1s linear;}
+
+  /* Hangszóró-gyűrű: pulzáló koncentrikus gyűrűk lejátszás közben */
+  .pad .speaker-ring{position:absolute;inset:0;pointer-events:none;display:none}
+  .pad.playing .speaker-ring{display:block}
+  .pad .speaker-ring i{position:absolute;inset:0;margin:auto;width:20%;height:20%;border-radius:50%;
+    border:2px solid var(--hot);opacity:0;animation:ring-pulse 1.8s ease-out infinite}
+  .pad .speaker-ring i:nth-child(2){animation-delay:.5s}
+  .pad .speaker-ring i:nth-child(3){animation-delay:1s}
+  @keyframes ring-pulse{0%{width:20%;height:20%;opacity:.55}100%{width:130%;height:130%;opacity:0}}
+  @media (prefers-reduced-motion: reduce){ .pad .speaker-ring i{animation:none;opacity:0} }
+
+  /* lejátszásszámláló */
+  .count{position:absolute;top:7px;left:7px;min-width:21px;height:21px;padding:0 6px;border-radius:999px;
+    background:rgba(0,0,0,.3);border:1px solid var(--line);color:var(--muted);
+    font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  .count.used{color:var(--text);border-color:var(--hot);background:rgba(255,201,60,.18);}
+  body.editing .count{display:none;}
+
+  /* loop */
+  .loopbtn{position:absolute;top:7px;right:7px;width:27px;height:27px;border-radius:8px;
+    background:rgba(0,0,0,.28);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;color:var(--muted);}
+  .loopbtn.on{color:#0d1017;background:var(--loop);border-color:var(--loop);
+    box-shadow:0 0 12px rgba(78,230,255,.55);}
+  .loopbtn svg{width:15px;height:15px;transition:transform .1s}
+  .loopbtn.spin svg{animation:loop-spin .5s var(--ease-out)}
+  @keyframes loop-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+  /* edit-mode delete + folder select */
+  .delbtn{position:absolute;top:7px;left:7px;width:27px;height:27px;border-radius:8px;
+    background:rgba(232,64,64,.16);border:1px solid rgba(232,64,64,.4);color:#ff7a5c;
+    display:none;align-items:center;justify-content:center;font-size:17px;line-height:1;}
+  body.editing .delbtn{display:flex;}
+  body.editing .pad{animation:wiggle .9s ease-in-out infinite;}
+  body.editing .loopbtn{opacity:.3;pointer-events:none;}
+  @keyframes wiggle{0%,100%{transform:rotate(-.7deg);}50%{transform:rotate(.7deg);}}
+  .padedit{display:none;}
+  body.editing .pad{aspect-ratio:auto;}
+  body.editing .pad .meta{display:none;}
+  body.editing .pad .padedit{display:block;}
+  .volrow{display:flex;align-items:center;gap:6px;margin-top:7px;}
+  .volrow .vico{font-size:12px;line-height:1;}
+  .volrow .volpct{font-size:10px;color:var(--muted);min-width:32px;text-align:right;}
+  .padvol{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;background:var(--line);}
+  .padvol::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--text);border:3px solid var(--bg);cursor:pointer;}
+  .padvol::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--text);
+    border:2px solid var(--bg);cursor:pointer;}
+  .movesel{width:100%;margin-top:7px;background:var(--bg);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;font:inherit;font-size:11px;padding:5px;}
+
+  /* add tile */
+  .addpad{aspect-ratio:1/1;border-radius:14px;border:2px dashed var(--line);background:transparent;
+    color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    cursor:pointer;font:inherit;font-size:11px;letter-spacing:.05em;text-align:center;}
+  .addpad:active{background:var(--panel);}
+  .addpad .plus{font-size:30px;font-weight:300;line-height:1;}
+
+  .foldernote{grid-column:1/-1;color:var(--muted);font-size:12px;padding:6px 2px;}
+
+  /* empty state */
+  .empty{text-align:center;color:var(--muted);padding:54px 24px;max-width:420px;margin:0 auto;}
+  .empty h2{color:var(--text);font-size:16px;letter-spacing:.08em;margin:0 0 10px;}
+  .empty p{font-size:13px;line-height:1.7;margin:0 0 22px;}
+  .empty .iconbtn{display:inline-flex;justify-content:center;}
+
+  footer{position:relative;z-index:1;flex:0 0 auto;padding:9px 14px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:10px;letter-spacing:.06em;text-align:center;background:var(--panel);}
+  footer b{color:var(--green);}
+
+  .solved{margin-top:11px;width:100%;border:none;border-radius:12px;
+    background:linear-gradient(180deg,#6fdc96,#3fa56a);color:#0b1f14;font:inherit;font-weight:800;
+    letter-spacing:.16em;text-transform:uppercase;font-size:15px;padding:15px;cursor:pointer;
+    box-shadow:0 4px 0 #1f5a38;}
+  .solved:active{transform:translateY(3px);box-shadow:0 1px 0 #1f5a38;}
+  .solved.flash{animation:flash .45s ease-out;}
+  @keyframes flash{0%{filter:brightness(1.7);}100%{filter:brightness(1);}}
+
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div id="ambient"><span></span><span></span></div>
+
+<div id="logPanel">
+  <div class="log-head">
+    <h2>Esemény-napló</h2>
+    <div style="display:flex;gap:8px">
+      <button class="log-close" id="logResetAllBtn" style="background:rgba(232,64,64,.18);color:#ff8a8a;border-color:rgba(232,64,64,.4)">🔄 Minden app resetelése</button>
+      <button class="log-close" id="logCloseBtn">Bezár</button>
+    </div>
+  </div>
+  <div id="logList"><div class="log-empty">Még nincs esemény.</div></div>
+</div>
+
+<div id="startup-gate">
+  <div class="sg-logo">🎮 GM APP</div>
+  <div class="sg-buttons">
+    <button id="sg-new">🆕 Új játék</button>
+    <button id="sg-continue">▶ Folytatás</button>
+  </div>
+  <div class="sg-intro-row">
+    <span id="sg-intro-name">Nincs intro-hang beállítva</span>
+    <button id="sg-intro-pick">🎵 Intro hang</button>
+    <button id="sg-intro-del">🗑</button>
+    <input type="file" id="sg-intro-file" accept="audio/*" style="display:none">
+  </div>
+</div>
+
+<div id="intro-overlay">
+  <div class="intro-logo">🎮</div>
+  <div class="intro-title">GM APP</div>
+</div>
+
+<header>
+  <div class="titlerow">
+    <div class="brand">
+      <span class="dot" id="liveDot"></span>
+      <h1>Soundboard</h1>
+      <small id="count">0 hang</small>
+    </div>
+    <div class="barbtns">
+      <button class="iconbtn ctrl" id="ctrlBtn">🎮 Vezérlő</button>
+      <button class="iconbtn" id="logBtn">📋 Log</button>
+      <button class="iconbtn" id="editBtn">Szerkeszt</button>
+      <button class="iconbtn stop" id="stopBtn">■ Mind le</button>
+    </div>
+  </div>
+
+  <div class="vol">
+    <span>Hangerő</span>
+    <input type="range" id="vol" min="0" max="1" step="0.01" value="0.9">
+  </div>
+
+  <div class="ctrlrow">
+    <button class="iconbtn on" id="fadeBtn">Fade: be</button>
+    <button class="iconbtn" id="resetBtn">⟳ Új menet</button>
+  </div>
+
+  <div class="folderbar" id="folderbar"></div>
+
+  <div class="ftools" id="folderTools">
+    <button class="iconbtn" id="renameFolderBtn">✎ Mappa átnevezése</button>
+    <button class="iconbtn" id="delFolderBtn">🗑 Mappa törlése</button>
+  </div>
+
+  <button class="solved" id="solvedBtn">✓ Megoldva</button>
+</header>
+
+<main>
+  <div id="emptyState" class="empty" hidden>
+    <h2>Még üres a tábla</h2>
+    <p>Tölts be MP3 (vagy más hang) fájlokat a telefonodról. Gombnyomásra lejátssza őket, bármelyiket loopolhatod, mappákba rendezheted, és minden hangnál látod, hányszor szólt már. A hangok a böngészőben tárolódnak, így legközelebb is itt lesznek.</p>
+    <button class="iconbtn" id="emptyAdd">+ Hangok hozzáadása</button>
+  </div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.2</span></footer>
+
+<input type="file" id="filein" accept="audio/*,.mp3,.m4a,.ogg,.wav,.aac,.flac" multiple>
+
+<!-- ===== Scoreboard távvezérlő panel ===== -->
+<div id="ctrlPanel">
+  <div class="cp-head">
+    <h2>🎮 GM App</h2>
+    <button class="cp-close" id="ctrlClose">🔊 Hangok</button>
+  </div>
+  <div class="cp-sel">
+    <div class="lbl">Kiválasztott feladvány</div>
+    <div class="word" id="cpWord">—</div>
+    <div class="meta" id="cpMeta"></div>
+  </div>
+  <button class="cp-start disabled" id="cpStart">▶ Időzítő indítása</button>
+  <button class="cp-lip-btn" id="cpLipManualStart" style="margin:0 16px 14px;width:calc(100% - 32px);padding:12px;display:none;">🔊 Szájról olvasás hang indítása</button>
+  <button class="solved" id="cpSolvedBtn" style="margin:0 16px 14px;width:calc(100% - 32px)">✓ Megoldva</button>
+
+  <div class="cp-lip">
+    <div class="lbl">Szájról olvasás hang <span class="cp-lip-hint">— automatikusan, max hangerőn indul</span></div>
+    <div class="cp-lip-row">
+      <button class="cp-lip-btn" id="cpLipPick">🎵 Hang kiválasztása</button>
+      <button class="cp-lip-btn test" id="cpLipTest">▶ Teszt</button>
+      <button class="cp-lip-btn del" id="cpLipDel">🗑</button>
+    </div>
+    <div class="cp-lip-name" id="cpLipName">Nincs hang beállítva</div>
+    <input type="file" id="cpLipFile" accept="audio/*,.mp3,.m4a,.ogg,.wav,.aac,.flac" style="display:none">
+  </div>
+
+  <div class="cp-lip">
+    <div class="lbl">Kivetítő egyéni hangjainak hangereje <span class="cp-lip-hint">— a beépített effektek mindig max hangerőn szólnak</span></div>
+    <div style="display:flex;align-items:center;gap:10px;padding:0 2px;">
+      <span style="font-size:16px">🔉</span>
+      <input type="range" id="cpProjectorVol" min="0" max="1" step="0.01" value="0.05" style="flex:1">
+      <span id="cpProjectorVolPct" style="font-size:12px;color:var(--muted);min-width:34px;text-align:right">5%</span>
+    </div>
+  </div>
+
+  <div class="cp-teams" id="cpTeams">
+    <div class="cp-empty">Még nincs futó játék a scoreboardon.<br>Indítsd el ott a meccset, és a csapatok itt megjelennek.</div>
+  </div>
+
+  <!-- ===== RABLÁS képernyő - a ctrlPanel fölé kerül, amíg fut a rablás ===== -->
+  <div id="cpRobbery">
+    <div class="rob-eyebrow">RABLÁS</div>
+    <div class="rob-team" id="robTeamName">—</div>
+    <div class="rob-hint">Kitalálta a választ?</div>
+    <div class="rob-btns">
+      <button class="rob-btn no" id="robNoBtn">✗ Nem talált</button>
+      <button class="rob-btn yes" id="robYesBtn">✓ Megoldva</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- IndexedDB tárolás ---------- */
+const DB="soundboard_db", STORE="sounds";
+let db;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB,1);
+    r.onupgradeneeded=()=>r.result.createObjectStore(STORE,{keyPath:"id"});
+    r.onsuccess=()=>res(r.result);
+    r.onerror=()=>rej(r.error);
+  });
+}
+function tx(mode){return db.transaction(STORE,mode).objectStore(STORE);}
+function dbAll(){return new Promise((res,rej)=>{const q=tx("readonly").getAll();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});}
+function dbPut(o){return new Promise((res,rej)=>{const q=tx("readwrite").put(o);q.onsuccess=()=>res();q.onerror=()=>rej(q.error);});}
+function dbDel(id){return new Promise((res,rej)=>{const q=tx("readwrite").delete(id);q.onsuccess=()=>res();q.onerror=()=>rej(q.error);});}
+function dbGet(id){return new Promise((res,rej)=>{const q=tx("readonly").get(id);q.onsuccess=()=>res(q.result||null);q.onerror=()=>rej(q.error);});}
+
+/* ---------- Állapot ---------- */
+let pads=[];                 // {id,name,blob,loop,order,folder,plays}
+let folders=["Általános"];
+let activeFolder="__ALL__";
+let fadeEnabled=true;
+const FADE_MS=300;
+const players={};            // id -> Audio
+const playing=new Set();     // épp szóló padek id-jei
+let masterVol=0.9;
+
+const grid=document.getElementById("grid");
+const empty=document.getElementById("emptyState");
+const countEl=document.getElementById("count");
+const filein=document.getElementById("filein");
+
+function saveFolders(){ localStorage.setItem("sb_folders",JSON.stringify(folders)); }
+
+/* ---------- Betöltés ---------- */
+(async function init(){
+  try{ db=await openDB(); }
+  catch(e){ alert("Nem sikerült megnyitni a tárolót. Privát/inkognitó módban a hangok nem maradnak meg."); }
+  if(db){
+    const all=(await dbAll());
+    pads=all.filter(p=>!String(p.id).startsWith("__")).sort((a,b)=>a.order-b.order);
+  }
+
+  // mappák betöltése / kialakítása
+  const stored=JSON.parse(localStorage.getItem("sb_folders")||"null");
+  if(Array.isArray(stored) && stored.length){ folders=stored; }
+  else{
+    const distinct=[...new Set(pads.map(p=>p.folder).filter(Boolean))];
+    folders = distinct.length ? distinct : ["Általános"];
+    saveFolders();
+  }
+  // padek normalizálása (régi adat: nincs folder/plays)
+  for(const p of pads){
+    let changed=false;
+    if(!p.folder || !folders.includes(p.folder)){ p.folder=folders[0]; changed=true; }
+    if(typeof p.plays!=="number"){ p.plays=0; changed=true; }
+    if(typeof p.vol!=="number"){ p.vol=1; changed=true; }
+    if(changed) await dbPut(p);
+  }
+
+  activeFolder = localStorage.getItem("sb_activeFolder") || "__ALL__";
+  if(activeFolder!=="__ALL__" && !folders.includes(activeFolder)) activeFolder="__ALL__";
+
+  fadeEnabled = localStorage.getItem("sb_fade")!=="0";
+  updateFadeBtn();
+
+  const sv=parseFloat(localStorage.getItem("sb_vol"));
+  if(!isNaN(sv)){ masterVol=sv; document.getElementById("vol").value=sv; }
+
+  render();
+  loadLipSound();
+})();
+
+/* ---------- Render ---------- */
+function visiblePads(){
+  return activeFolder==="__ALL__" ? pads : pads.filter(p=>p.folder===activeFolder);
+}
+
+function renderFolders(){
+  document.body.classList.toggle("folder-all", activeFolder==="__ALL__");
+  const bar=document.getElementById("folderbar");
+  bar.innerHTML="";
+  const mk=(label,cnt,val)=>{
+    const c=document.createElement("button");
+    c.className="chip"+(activeFolder===val?" active":"");
+    c.innerHTML=label+(cnt!=null?` <i>${cnt}</i>`:"");
+    c.addEventListener("click",()=>{ activeFolder=val; localStorage.setItem("sb_activeFolder",val); render(); });
+    return c;
+  };
+  bar.appendChild(mk("Mind",pads.length,"__ALL__"));
+  folders.forEach(f=> bar.appendChild(mk(f, pads.filter(p=>p.folder===f).length, f)) );
+  const add=document.createElement("button");
+  add.className="chip add"; add.textContent="+ mappa";
+  add.addEventListener("click",addFolder);
+  bar.appendChild(add);
+}
+
+function render(){
+  renderFolders();
+  grid.innerHTML="";
+  empty.hidden = pads.length>0;
+  countEl.textContent = pads.length + " hang";
+  if(pads.length===0) return;
+
+  const list=visiblePads();
+  if(list.length===0){
+    const note=document.createElement("div");
+    note.className="foldernote";
+    note.innerHTML=`Ebben a mappában még nincs hang.<br><button class="iconbtn" style="margin-top:8px" id="folderEmptyAdd">+ Hang hozzáadása</button>`;
+    grid.appendChild(note);
+    note.querySelector("#folderEmptyAdd").addEventListener("click",()=>filein.click());
+  }
+
+  const folderOptions=folders.map(f=>`<option value="${f}">${f}</option>`).join("");
+
+  list.forEach((p,i)=>{
+    const pad=document.createElement("div");
+    pad.className="pad"+(playing.has(p.id)?" playing":"");
+    pad.dataset.id=p.id;
+    pad.style.setProperty('--i', i);
+    pad.innerHTML=`
+      <div class="speaker-ring"><i></i><i></i><i></i></div>
+      <button class="delbtn" aria-label="Törlés">×</button>
+      <div class="count ${p.plays?'used':''}" title="Lejátszva">${p.plays||0}</div>
+      <button class="loopbtn ${p.loop?'on':''}" aria-label="Loop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 014-4h14"/>
+          <path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 01-4 4H3"/>
+        </svg>
+      </button>
+      <div class="bar"></div>
+      <div class="name"></div>
+      <div class="meta">${p.loop?'LOOP':'EGYSZER'}${(p.vol??1)<1?` · ${Math.round((p.vol??1)*100)}%`:''}</div>
+      <div class="padedit">
+        <div class="volrow"><span class="vico">🔊</span><input type="range" class="padvol" min="0" max="1" step="0.05"><span class="volpct">100%</span></div>
+        <select class="movesel">${folderOptions}</select>
+      </div>`;
+    pad.querySelector(".name").textContent=p.name;
+    pad.querySelector(".movesel").value=p.folder;
+
+    const pv=pad.querySelector(".padvol");
+    const pct=pad.querySelector(".volpct");
+    pv.value=(p.vol??1);
+    pct.textContent=Math.round((p.vol??1)*100)+"%";
+    pv.addEventListener("click",e=>e.stopPropagation());
+    pv.addEventListener("input",e=>{
+      e.stopPropagation();
+      p.vol=parseFloat(e.target.value);
+      pct.textContent=Math.round(p.vol*100)+"%";
+      const a=players[p.id]; if(a && !a._fadeIv) a.volume=effVol(p);
+    });
+    pv.addEventListener("change",e=>{
+      e.stopPropagation(); dbPut(p);
+      const meta=pad.querySelector(".meta");
+      if(meta) meta.textContent=(p.loop?'LOOP':'EGYSZER')+(p.vol<1?` · ${Math.round(p.vol*100)}%`:'');
+    });
+
+    pad.addEventListener("click",e=>{
+      if(document.body.classList.contains("editing")) return;
+      if(e.target.closest(".loopbtn")) return;
+      togglePlay(p.id);
+    });
+    pad.querySelector(".loopbtn").addEventListener("click",e=>{ e.stopPropagation(); toggleLoop(p.id); });
+    pad.querySelector(".name").addEventListener("click",e=>{
+      if(document.body.classList.contains("editing")){ e.stopPropagation(); rename(p.id); }
+    });
+    pad.querySelector(".delbtn").addEventListener("click",e=>{ e.stopPropagation(); removePad(p.id); });
+    pad.querySelector(".movesel").addEventListener("click",e=>e.stopPropagation());
+    pad.querySelector(".movesel").addEventListener("change",e=>{
+      e.stopPropagation(); p.folder=e.target.value; dbPut(p); render();
+    });
+
+    grid.appendChild(pad);
+  });
+
+  const add=document.createElement("button");
+  add.className="addpad";
+  add.innerHTML=`<span class="plus">+</span><span>Hang hozzáadása</span>`;
+  add.addEventListener("click",()=>filein.click());
+  grid.appendChild(add);
+}
+
+/* ---------- Lejátszás + fade ---------- */
+function effVol(p){ return masterVol * (p && typeof p.vol==="number" ? p.vol : 1); }
+function effVolById(id){ return effVol(pads.find(x=>x.id===id)); }
+function getPlayer(p){
+  if(players[p.id]) return players[p.id];
+  const a=new Audio(URL.createObjectURL(p.blob));
+  a.loop=!!p.loop; a.volume=effVol(p);
+  a.addEventListener("timeupdate",()=>updateBar(p.id,a));
+  a.addEventListener("ended",()=>{ if(!a.loop){ playing.delete(p.id); markStopped(p.id);} });
+  players[p.id]=a;
+  return a;
+}
+function clearFade(a){ if(a && a._fadeIv){ clearInterval(a._fadeIv); a._fadeIv=null; } }
+
+function startPad(id){
+  const p=pads.find(x=>x.id===id); if(!p) return;
+  const a=getPlayer(p);
+  clearFade(a);
+  a.loop=!!p.loop; a.volume=effVol(p); a.currentTime=0;
+  a.play().catch(()=>{});
+  playing.add(id); markPlaying(id);
+  p.plays=(p.plays||0)+1; dbPut(p); updateCount(id,p.plays);
+}
+function stopPad(id, immediate){
+  const a=players[id];
+  playing.delete(id); markStopped(id);
+  if(!a) return;
+  clearFade(a);
+  if(immediate || !fadeEnabled || a.paused){
+    a.pause(); a.currentTime=0; a.volume=effVolById(id); return;
+  }
+  const steps=14, sv=a.volume; let i=0;
+  a._fadeIv=setInterval(()=>{
+    i++; a.volume=Math.max(0, sv*(1-i/steps));
+    if(i>=steps){ clearFade(a); a.pause(); a.currentTime=0; a.volume=effVolById(id); }
+  }, FADE_MS/steps);
+}
+function togglePlay(id){ playing.has(id) ? stopPad(id) : startPad(id); }
+
+function toggleLoop(id){
+  const p=pads.find(x=>x.id===id); if(!p) return;
+  p.loop=!p.loop; if(players[id]) players[id].loop=p.loop;
+  dbPut(p);
+  const pad=grid.querySelector(`.pad[data-id="${CSS.escape(id)}"]`);
+  if(pad){
+    const lb=pad.querySelector(".loopbtn");
+    lb.classList.toggle("on",p.loop);
+    if(p.loop){ lb.classList.remove("spin"); void lb.offsetWidth; lb.classList.add("spin"); }
+    pad.querySelector(".meta").textContent=(p.loop?"LOOP":"EGYSZER")+((p.vol??1)<1?` · ${Math.round((p.vol??1)*100)}%`:"");
+  }
+}
+function markPlaying(id){ grid.querySelector(`.pad[data-id="${CSS.escape(id)}"]`)?.classList.add("playing"); }
+function markStopped(id){
+  const pad=grid.querySelector(`.pad[data-id="${CSS.escape(id)}"]`);
+  if(pad){ pad.classList.remove("playing"); pad.querySelector(".bar").style.width="0"; }
+}
+function updateBar(id,a){
+  const pad=grid.querySelector(`.pad[data-id="${CSS.escape(id)}"]`);
+  if(pad && a.duration){ pad.querySelector(".bar").style.width=(a.currentTime/a.duration*100)+"%"; }
+}
+function updateCount(id,n){
+  const pad=grid.querySelector(`.pad[data-id="${CSS.escape(id)}"]`);
+  if(pad){ const c=pad.querySelector(".count"); c.textContent=n; c.classList.toggle("used",n>0); }
+}
+function stopAll(){ Array.from(playing).forEach(id=>stopPad(id)); }
+
+/* ---------- Fájlok hozzáadása ---------- */
+filein.addEventListener("change", async e=>{
+  const files=[...e.target.files]; filein.value="";
+  if(!files.length) return;
+  let target = activeFolder!=="__ALL__" ? activeFolder : (folders[0]||"Általános");
+  if(!folders.includes(target)){ folders.push(target); saveFolders(); }
+  let order = pads.length ? Math.max(...pads.map(p=>p.order))+1 : 0;
+  for(const f of files){
+    const p={ id:crypto.randomUUID(), name:f.name.replace(/\.[^.]+$/,""),
+              blob:f, loop:false, order:order++, folder:target, plays:0, vol:1 };
+    pads.push(p);
+    try{ await dbPut(p); }catch(err){ alert("Nem sikerült elmenteni: "+f.name); }
+  }
+  render();
+});
+
+/* ---------- Átnevezés / törlés (pad) ---------- */
+function rename(id){
+  const p=pads.find(x=>x.id===id); if(!p) return;
+  const n=prompt("Pad neve:",p.name);
+  if(n!==null){ p.name=n.trim()||p.name; dbPut(p); render(); }
+}
+async function removePad(id){
+  const p=pads.find(x=>x.id===id); if(!p) return;
+  if(!confirm(`Törlöd ezt: "${p.name}"?`)) return;
+  if(players[id]){ players[id].pause(); delete players[id]; }
+  playing.delete(id);
+  await dbDel(id);
+  pads=pads.filter(x=>x.id!==id);
+  render();
+}
+
+/* ---------- Mappák kezelése ---------- */
+function addFolder(){
+  const n=prompt("Új mappa neve:"); if(n===null) return;
+  const name=n.trim(); if(!name) return;
+  if(!folders.includes(name)){ folders.push(name); saveFolders(); }
+  activeFolder=name; localStorage.setItem("sb_activeFolder",name);
+  render();
+}
+async function renameFolder(){
+  if(activeFolder==="__ALL__") return;
+  const n=prompt("Mappa új neve:",activeFolder); if(n===null) return;
+  const name=n.trim(); if(!name||name===activeFolder) return;
+  if(folders.includes(name)){ alert("Már van ilyen nevű mappa."); return; }
+  folders[folders.indexOf(activeFolder)]=name; saveFolders();
+  for(const p of pads){ if(p.folder===activeFolder){ p.folder=name; await dbPut(p); } }
+  activeFolder=name; localStorage.setItem("sb_activeFolder",name);
+  render();
+}
+async function deleteFolder(){
+  if(activeFolder==="__ALL__") return;
+  const cnt=pads.filter(p=>p.folder===activeFolder).length;
+  const msg=`Törlöd a(z) "${activeFolder}" mappát?`+
+    (cnt?`\nA benne lévő ${cnt} hang átkerül egy másik mappába — a hangok megmaradnak.`:"");
+  if(!confirm(msg)) return;
+  let remaining=folders.filter(f=>f!==activeFolder);
+  let tgt=remaining[0];
+  if(!tgt){ tgt="Általános"; remaining=[tgt]; }
+  for(const p of pads){ if(p.folder===activeFolder){ p.folder=tgt; await dbPut(p); } }
+  folders=remaining; saveFolders();
+  activeFolder="__ALL__"; localStorage.setItem("sb_activeFolder",activeFolder);
+  render();
+}
+document.getElementById("renameFolderBtn").addEventListener("click",renameFolder);
+document.getElementById("delFolderBtn").addEventListener("click",deleteFolder);
+
+/* ---------- Session reset ---------- */
+document.getElementById("resetBtn").addEventListener("click", async ()=>{
+  if(!confirm("Új játékmenet?\nMinden hang ismétlésszámlálója 0-ra áll. A hangok és mappák megmaradnak.")) return;
+  stopAll();
+  for(const p of pads){ if(p.plays){ p.plays=0; await dbPut(p); } }
+  render();
+});
+
+/* ---------- Fade kapcsoló ---------- */
+function updateFadeBtn(){
+  const b=document.getElementById("fadeBtn");
+  b.classList.toggle("on",fadeEnabled);
+  b.textContent="Fade: "+(fadeEnabled?"be":"ki");
+}
+document.getElementById("fadeBtn").addEventListener("click",()=>{
+  fadeEnabled=!fadeEnabled; localStorage.setItem("sb_fade",fadeEnabled?"1":"0"); updateFadeBtn();
+});
+
+/* ---------- Activity Centrum — közös Firebase (Scoreboarddal azonos) ---------- */
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyCaQYwKXkmTyKX-oUDYnvYmXeyP9PR8WEU",
+  authDomain:        "activity-centrum.firebaseapp.com",
+  databaseURL:       "https://activity-centrum-default-rtdb.firebaseio.com",
+  projectId:         "activity-centrum",
+  storageBucket:     "activity-centrum.firebasestorage.app",
+  messagingSenderId: "1008452626252",
+  appId:             "1:1008452626252:web:2f5f542e7b4785fa4551e9"
+};
+
+let fbDB=null;
+function setDot(connected){
+  const dot=document.getElementById("liveDot");
+  dot.style.background = connected ? "var(--green)" : "var(--muted)";
+  dot.style.boxShadow  = connected ? "0 0 10px var(--green)" : "none";
+}
+function initFirebase(){
+  if(typeof firebase==="undefined"){ console.warn("Firebase SDK nem töltődött be (offline?)."); setDot(false); return; }
+  try{
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fbDB=firebase.database();
+    fbDB.ref(".info/connected").on("value",s=>setDot(s.val()===true));
+    fbDB.ref("activityGame/status").on("value",s=>{
+      const st=s.val();
+      if(st==="solved"||st==="timeout") stopAll();
+    });
+    attachRemoteListeners();
+    initProjectorVolume();
+    initLogPanel();
+  }catch(e){ console.error("Firebase init hiba:",e); setDot(false); }
+}
+
+/* ===== Esemény-napló - kivetítő/konzol/GM App eseményei egy közös
+   Firebase listában (activityLog), időrendben, legújabb felül. ===== */
+function initLogPanel(){
+  const listEl=document.getElementById("logList");
+  const panel=document.getElementById("logPanel");
+  const openBtn=document.getElementById("logBtn");
+  const closeBtn=document.getElementById("logCloseBtn");
+  if(!listEl||!openBtn) return;
+
+  function fmtTime(ts){
+    const d=new Date(ts);
+    return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0")+":"+d.getSeconds().toString().padStart(2,"0");
+  }
+  fbDB.ref("activityLog").limitToLast(200).on("value", s=>{
+    const val=s.val();
+    const entries = val ? Object.values(val) : [];
+    entries.sort((a,b)=>(a.ts||0)-(b.ts||0));
+    if(!entries.length){ listEl.innerHTML='<div class="log-empty">Még nincs esemény.</div>'; return; }
+    listEl.innerHTML = entries.map(e=>`<div class="log-item"><span class="log-time">${fmtTime(e.ts)}</span><span>${(e.text||"").replace(/</g,"&lt;")}</span></div>`).join("");
+  });
+  openBtn.addEventListener("click", ()=>panel.classList.add("open"));
+  closeBtn.addEventListener("click", ()=>panel.classList.remove("open"));
+  const resetAllBtn=document.getElementById("logResetAllBtn");
+  if(resetAllBtn){
+    resetAllBtn.addEventListener("click", ()=>{
+      if(!confirm("Biztos resetelsz MINDEN appot? A pontok nullázódnak, minden app lejátssza a saját introját, és minden ismétlésfigyelés (szavak, hangok) újraindul.")) return;
+      panel.classList.remove("open");
+      triggerFullReset();
+    });
+  }
+}
+
+/* GM App saját eseményeinek naplózása (pl. új játék indítás, hangerő állítás) */
+function pushLog(text){
+  try{ if(fbDB) fbDB.ref("activityLog").push({ ts: Date.now(), text: String(text) }); }catch(e){}
+}
+
+/* Kivetítő egyéni (feltöltött) hangjainak távoli hangereje */
+function initProjectorVolume(){
+  const slider=document.getElementById("cpProjectorVol");
+  const pct=document.getElementById("cpProjectorVolPct");
+  if(!slider) return;
+  fbDB.ref("activityControl/customVolume").on("value", s=>{
+    const raw = s.val();
+    if(raw===null || raw===undefined){ fbDB.ref("activityControl/customVolume").set(0.05); return; }
+    if(document.activeElement!==slider) slider.value=raw;
+    pct.textContent = Math.round(raw*100)+"%";
+  });
+  let pushTimer=null;
+  slider.addEventListener("input", ()=>{
+    pct.textContent = Math.round(slider.value*100)+"%";
+    clearTimeout(pushTimer);
+    pushTimer=setTimeout(()=>{ fbDB.ref("activityControl/customVolume").set(Number(slider.value)); }, 120);
+  });
+}
+
+const bc=("BroadcastChannel" in window)?new BroadcastChannel("activity_centrum"):null;
+if(bc) bc.onmessage=e=>{ if(e.data&&e.data.action==="solved") stopAll(); };
+
+function signalSolved(){
+  if(fbDB){
+    fbDB.ref("activityGame").update({ status:"solved" })
+        .catch(err=>console.error("Firebase írás hiba:",err));
+  }
+  try{ bc && bc.postMessage({app:"soundboard",action:"solved",ts:Date.now()}); }catch(e){}
+}
+
+document.getElementById("solvedBtn").addEventListener("click",function(){
+  signalSolved();
+  stopAll();
+  this.classList.remove("flash"); void this.offsetWidth; this.classList.add("flash");
+});
+
+/* ---------- Egyéb vezérlők ---------- */
+document.getElementById("stopBtn").addEventListener("click",stopAll);
+window.addEventListener("load",initFirebase);
+
+/* ===== Intro-hang tárolása (IndexedDB, appnkénti külön adatbázis) ===== */
+const IntroKit = (()=>{
+  const DB="reactivity_intro_gmapp", STORE="intro";
+  let db=null;
+  function openDB(){ return new Promise((res,rej)=>{ if(db) return res(db); const r=indexedDB.open(DB,1);
+    r.onupgradeneeded=e=>{ e.target.result.createObjectStore(STORE); };
+    r.onsuccess=e=>{ db=e.target.result; res(db); }; r.onerror=rej; }); }
+  async function save(file){ const d=await openDB(); return new Promise((res,rej)=>{ const tx=d.transaction(STORE,"readwrite"); tx.objectStore(STORE).put(file,"track"); tx.oncomplete=res; tx.onerror=rej; }); }
+  async function load(){ const d=await openDB(); return new Promise((res,rej)=>{ const tx=d.transaction(STORE,"readonly"); const req=tx.objectStore(STORE).get("track"); req.onsuccess=()=>res(req.result||null); req.onerror=rej; }); }
+  async function clear(){ const d=await openDB(); return new Promise((res,rej)=>{ const tx=d.transaction(STORE,"readwrite"); tx.objectStore(STORE).delete("track"); tx.oncomplete=res; tx.onerror=rej; }); }
+  return {save, load, clear};
+})();
+
+function playIntro(onDone){
+  const overlay=document.getElementById("intro-overlay");
+  overlay.classList.add("show");
+  IntroKit.load().then(blob=>{ if(blob){ try{ new Audio(URL.createObjectURL(blob)).play().catch(()=>{}); }catch(e){} } });
+  setTimeout(()=>{ overlay.classList.remove("show"); if(onDone) onDone(); }, 2500);
+}
+
+async function refreshIntroName(){
+  const blob = await IntroKit.load();
+  document.getElementById("sg-intro-name").textContent = blob ? "🎵 Intro hang beállítva" : "Nincs intro-hang beállítva";
+}
+refreshIntroName();
+document.getElementById("sg-intro-pick").addEventListener("click",()=>document.getElementById("sg-intro-file").click());
+document.getElementById("sg-intro-file").addEventListener("change",async function(){
+  if(this.files && this.files[0]){ await IntroKit.save(this.files[0]); await refreshIntroName(); }
+  this.value="";
+});
+document.getElementById("sg-intro-del").addEventListener("click",async ()=>{ await IntroKit.clear(); await refreshIntroName(); });
+
+/* ===== Új játék / Folytatás kezdőkapu ===== */
+// Közös reset-logika: ezt hívja mind a kezdőkapu "Új játék" gombja, mind a
+// log panel "Minden app resetelése" gombja - mindkettő ugyanazt az
+// activityControl/newGameSignal jelet küldi, amire minden app (konzol,
+// kivetítő, rabló app) a saját intróját játssza le és nullázza magát.
+async function triggerFullReset(){
+  playIntro();
+  try{
+    if(fbDB){
+      const snap = await fbDB.ref("activityTeams/teams").once("value");
+      const teams = snap.val();
+      if(Array.isArray(teams)){
+        teams.forEach(t=>{ t.score=0; });
+        await fbDB.ref("activityTeams/teams").set(teams);
+      }
+      await fbDB.ref("activityControl/newGameSignal").set(Date.now());
+      pushLog("🔄 Minden app resetelve (GM App gombjából)");
+    }
+  }catch(e){ console.error("Reset hiba:",e); }
+}
+document.getElementById("sg-continue").addEventListener("click",()=>{
+  document.getElementById("startup-gate").style.display="none";
+});
+document.getElementById("sg-new").addEventListener("click",()=>{
+  document.getElementById("startup-gate").style.display="none";
+  triggerFullReset();
+});
+document.getElementById("editBtn").addEventListener("click",function(){
+  const on=document.body.classList.toggle("editing");
+  this.classList.toggle("on",on);
+  this.textContent=on?"Kész":"Szerkeszt";
+});
+document.getElementById("emptyAdd").addEventListener("click",()=>filein.click());
+document.getElementById("vol").addEventListener("input",e=>{
+  masterVol=parseFloat(e.target.value);
+  pads.forEach(p=>{ const a=players[p.id]; if(a && !a._fadeIv) a.volume=effVol(p); });
+  localStorage.setItem("sb_vol",masterVol);
+});
+
+let wakeLock=null;
+async function keepAwake(){ try{ if("wakeLock" in navigator) wakeLock=await navigator.wakeLock.request("screen"); }catch(e){} }
+document.addEventListener("click",keepAwake,{once:true});
+
+/* ===== Scoreboard távvezérlő ===== */
+let cpTeamsData = [];
+let cpTurnIndex = -1;
+let cpGameStatus = "idle";
+
+function attachRemoteListeners(){
+  if(!fbDB) return;
+  // Csapatok + pontok (a scoreboard írja ide)
+  fbDB.ref("activityTeams").on("value", s => { renderRemoteTeams(s.val()); });
+  // Kiválasztott feladvány + állapot (a konzol írja)
+  fbDB.ref("activityGame").on("value", s => { renderRemoteStatus(s.val()); });
+  // Rablás: a Rabló App(ok) írnak a queue-ba, mi (a GM) vezéreljük tovább
+  fbDB.ref("activityRobbery").on("value", s => { renderRobbery(s.val()); });
+}
+
+/* ===== RABLÁS vezérlés =====
+   A queue-t a Rabló App(ok) töltik fel push()-sal (sorrend = ts szerint).
+   A GM App dönti el (Megoldva / Nem talált gombokkal), hogy ki próbálkozhat,
+   és lépteti a currentIndex-et / írja a fix +1/-1 pontot. */
+let robQueue = [];
+let robCurrentIndex = -1;
+let robPhase = "collecting";
+
+function renderRobbery(raw){
+  const queueObj = (raw && raw.queue) || {};
+  robQueue = Object.values(queueObj).sort((a,b) => a.ts - b.ts);
+  robCurrentIndex = (raw && typeof raw.currentIndex === "number") ? raw.currentIndex : -1;
+  robPhase = (raw && raw.phase) || "collecting";
+
+  const panel = document.getElementById("cpRobbery");
+  const current = robQueue[robCurrentIndex];
+
+  if (robPhase === "attempting" && current) {
+    document.getElementById("robTeamName").textContent = current.teamName || "";
+    panel.classList.add("show");
+  } else {
+    panel.classList.remove("show");
+  }
+}
+
+document.getElementById("robYesBtn").addEventListener("click", () => {
+  const current = robQueue[robCurrentIndex];
+  if (!current || !fbDB) return;
+  // A pontozást (fix +1) és az ünneplés/kör-lezárás időzítését a kivetítő
+  // végzi - itt csak jelezzük neki, hogy sikerült.
+  fbDB.ref("activityRobbery").update({ phase: "success" });
+});
+
+document.getElementById("robNoBtn").addEventListener("click", () => {
+  const current = robQueue[robCurrentIndex];
+  if (!current || !fbDB) return;
+  // A pontlevonást (-1, akár mínuszba is), a következő rabló csapatra lépést
+  // (vagy a helyes válasz felfedését, ha nincs több) a kivetítő végzi, a saját
+  // 3 mp-es "Rablás sikertelen!" képernyője után - itt csak jelezzük neki.
+  fbDB.ref("activityRobbery").update({ phase: "failed" });
+});
+
+function renderRemoteTeams(data){
+  const box = document.getElementById("cpTeams");
+  if(!data || !Array.isArray(data.teams) || !data.teams.length){
+    cpTeamsData = []; cpTurnIndex = -1;
+    box.innerHTML = '<div class="cp-empty">Még nincs futó játék a scoreboardon.<br>Indítsd el ott a meccset, és a csapatok itt megjelennek.</div>';
+    return;
+  }
+  cpTeamsData = data.teams;
+  cpTurnIndex = (typeof data.turnIndex === "number") ? data.turnIndex : -1;
+
+  box.innerHTML = "";
+  cpTeamsData.forEach(t => {
+    const onTurn = (t.id === cpTurnIndex);
+    const row = document.createElement("div");
+    row.className = "cp-team" + (onTurn ? " onturn" : "");
+    row.style.borderLeftColor = t.color || "#888";
+
+    const nm = document.createElement("div");
+    nm.className = "nm";
+    nm.textContent = t.name || ("#" + t.id);
+    if(onTurn){
+      const tag = document.createElement("span");
+      tag.className = "turn-tag"; tag.textContent = "soron";
+      nm.appendChild(tag);
+    }
+
+    const sc = document.createElement("div");
+    sc.className = "sc";
+    sc.textContent = (typeof t.score === "number") ? t.score : 0;
+
+    const pm = document.createElement("div");
+    pm.className = "cp-pm";
+    const minus = document.createElement("button");
+    minus.className = "minus"; minus.textContent = "−";
+    minus.onclick = () => sendScore(t.id, -1);
+    const plus = document.createElement("button");
+    plus.className = "plus"; plus.textContent = "+";
+    plus.onclick = () => sendScore(t.id, +1);
+    pm.appendChild(minus); pm.appendChild(plus);
+
+    row.appendChild(nm); row.appendChild(sc); row.appendChild(pm);
+    box.appendChild(row);
+  });
+}
+
+let cpCurrentMode = "";
+
+// Ugyanaz a megjelenítendő-név leképezés, mint a konzolon (a belső adatkulcsok
+// nem változtak, csak a felhasználó felé mutatott elnevezés - 2026-07-15).
+const MODE_DISPLAY_NAMES = {
+  'Mutasd meg!':       'Mutogatás',
+  'Rajzold le!':       'Rajzolás',
+  'Írd körül!':        'Körülírás',
+  'Szájról olvasás!':  'Szájról olvasás'
+};
+
+let cpLastGameStatus = null;
+
+function renderRemoteStatus(data){
+  const wordEl = document.getElementById("cpWord");
+  const metaEl = document.getElementById("cpMeta");
+  const startBtn = document.getElementById("cpStart");
+  const status = (data && data.status) || "idle";
+  cpGameStatus = status;
+
+  // Lejárt idő + van jelentkező -> a rablás "collecting"-ből "attempting"-be vált,
+  // de csak 3 mp késleltetéssel, hogy előbb a sima "Lejárt az idő" képernyő
+  // látszódjon a kivetítőn. Csak friss átmenetnél (nem minden újrarenderelésnél) indítjuk.
+  const modeForRobberyCheck = (data && data.mode) || "";
+  if (status === "timeout" && cpLastGameStatus !== "timeout" && robPhase === "collecting" && robQueue.length > 0 && modeForRobberyCheck !== LIP_MODE && fbDB) {
+    setTimeout(() => {
+      if (fbDB && robPhase === "collecting") {
+        fbDB.ref("activityRobbery").update({ currentIndex: 0, phase: "attempting" });
+      }
+    }, 3000);
+  }
+  cpLastGameStatus = status;
+
+  const word = (data && data.word) ? data.word : "";
+  const mode = (data && data.mode) ? data.mode : "";
+  const pts  = (data && data.points != null) ? data.points : null;
+  cpCurrentMode = mode;
+
+  const lipBtn = document.getElementById("cpLipManualStart");
+  if(lipBtn) lipBtn.style.display = (mode || "").trim() === LIP_MODE ? "" : "none";
+
+  if(status === "ready"){
+    wordEl.textContent = word || "—";
+    metaEl.textContent = [MODE_DISPLAY_NAMES[mode] || mode, pts != null ? (pts + " pont") : ""].filter(Boolean).join(" · ");
+    startBtn.className = "cp-start";
+    startBtn.textContent = "▶ Időzítő indítása";
+  } else if(status === "running"){
+    wordEl.textContent = word || "—";
+    metaEl.textContent = "Időzítő fut…";
+    startBtn.className = "cp-start running disabled";
+    startBtn.textContent = "⏱ Fut…";
+  } else if(status === "solved" || status === "timeout"){
+    wordEl.textContent = word || "—";
+    metaEl.textContent = status === "solved" ? "✓ Megoldva" : "⏱ Lejárt";
+    startBtn.className = "cp-start disabled";
+    startBtn.textContent = "▶ Időzítő indítása";
+  } else {
+    wordEl.textContent = "—";
+    metaEl.textContent = "Nincs kiválasztott feladvány";
+    startBtn.className = "cp-start disabled";
+    startBtn.textContent = "▶ Időzítő indítása";
+  }
+
+  handleLipAuto(status, mode);   // szájról olvasás → automatikus hang
+}
+
+function sendScore(teamId, delta){
+  if(!fbDB) return;
+  fbDB.ref("activityControl/scoreQueue").push({ teamId, delta, ts: Date.now() })
+      .catch(err => console.error("Pont küldési hiba:", err));
+}
+
+function sendStartSignal(){
+  if(!fbDB){ console.warn("[GM App] Nincs Firebase kapcsolat, nem tudok jelet küldeni."); return; }
+  if(cpGameStatus !== "ready"){ console.warn("[GM App] A gomb inaktív, mert a játékállapot nem 'ready' (jelenleg: "+cpGameStatus+")."); return; }
+  // A gombnyomás valódi felhasználói gesztus, ezért itt (a Firebase-jel elküldése
+  // MELLETT, nem helyette) is elindítjuk a szájról olvasás hangját - a böngészők
+  // gyakran blokkolják a hangot, ha csak a Firebase-esemény (nem közvetlen
+  // kattintás) próbálja elindítani. Ez a fő, megbízható induló út; az automatikus
+  // (handleLipAuto) és a lenti kézi gomb csak biztonsági tartalék.
+  if((cpCurrentMode || "").trim() === LIP_MODE) playLipSound();
+  const ts = Date.now();
+  console.log("[GM App] startSignal küldése:", ts);
+  fbDB.ref("activityGame").update({ startSignal: ts })
+      .then(() => console.log("[GM App] startSignal sikeresen elküldve."))
+      .catch(err => console.error("[GM App] Indító jel hiba:", err));
+}
+
+document.getElementById("ctrlBtn").addEventListener("click", () => {
+  document.getElementById("ctrlPanel").classList.add("open");
+  keepAwake();
+});
+document.getElementById("ctrlClose").addEventListener("click", () => {
+  document.getElementById("ctrlPanel").classList.remove("open");
+});
+document.getElementById("cpStart").addEventListener("click", sendStartSignal);
+document.getElementById("cpSolvedBtn").addEventListener("click", function(){
+  signalSolved();
+  stopAll();
+  this.classList.remove("flash"); void this.offsetWidth; this.classList.add("flash");
+});
+
+// A GM App alapértelmezett módja a vezérlő lap - ez nyílik meg induláskor.
+// A "🔊 Hangok" gombbal érhető el a hangpad-tábla, a "🎮 Vezérlő" gombbal
+// (a hangpad nézet fejlécében) lehet visszatérni ide.
+document.getElementById("ctrlPanel").classList.add("open");
+
+/* ===== Szájról olvasás: automatikus hang max hangerőn ===== */
+const LIP_ID = "__lip__";
+const LIP_MODE = "Szájról olvasás!";
+let lipRecord = null;      // {id, name, blob}
+let lipAudio = null;
+let lipPrevStatus = null;
+
+async function loadLipSound(){
+  try{ lipRecord = await dbGet(LIP_ID); }catch(_){ lipRecord = null; }
+  updateLipUI();
+}
+function updateLipUI(){
+  const nameEl = document.getElementById("cpLipName");
+  if(!nameEl) return;
+  if(lipRecord && lipRecord.blob){ nameEl.textContent = lipRecord.name || "Beállított hang"; nameEl.classList.add("set"); }
+  else { nameEl.textContent = "Nincs hang beállítva"; nameEl.classList.remove("set"); }
+}
+function playLipSound(){
+  if(!lipRecord || !lipRecord.blob) return;
+  stopLipSound();
+  try{
+    lipAudio = new Audio(URL.createObjectURL(lipRecord.blob));
+    lipAudio.volume = 1.0;                 // max hangerő, a fő csúszkától függetlenül
+    lipAudio.play().catch(()=>{});         // ha a böngésző blokkolná, csendben kihagyjuk
+  }catch(_){}
+}
+function stopLipSound(){
+  if(lipAudio){ try{ lipAudio.pause(); }catch(_){} lipAudio = null; }
+}
+function handleLipAuto(status, mode){
+  const isLip = (mode || "").trim() === LIP_MODE;
+  // az időzítő indulásakor (running él) + szájról olvasás → automatikus hang
+  if(status === "running" && lipPrevStatus !== "running" && isLip) playLipSound();
+  // kör vége / üres állapot → leállítás
+  if(status === "solved" || status === "timeout" || status === "idle") stopLipSound();
+  lipPrevStatus = status;
+}
+
+document.getElementById("cpLipPick").addEventListener("click", ()=>document.getElementById("cpLipFile").click());
+document.getElementById("cpLipFile").addEventListener("change", async e=>{
+  const f = e.target.files && e.target.files[0]; e.target.value = "";
+  if(!f) return;
+  const rec = { id: LIP_ID, name: f.name, blob: f };
+  try{ await dbPut(rec); lipRecord = rec; updateLipUI(); }
+  catch(err){ alert("Nem sikerült elmenteni a hangot."); }
+});
+document.getElementById("cpLipTest").addEventListener("click", playLipSound);
+document.getElementById("cpLipManualStart").addEventListener("click", playLipSound);
+document.getElementById("cpLipDel").addEventListener("click", async ()=>{
+  stopLipSound();
+  try{ await dbDel(LIP_ID); }catch(_){}
+  lipRecord = null; updateLipUI();
+});
+</script>
+</body>
+</html>
