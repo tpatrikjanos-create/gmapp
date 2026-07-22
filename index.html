@@ -381,7 +381,7 @@
   <div class="grid" id="grid"></div>
 </main>
 
-<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.4</span></footer>
+<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.5</span></footer>
 
 <input type="file" id="filein" accept="audio/*,.mp3,.m4a,.ogg,.wav,.aac,.flac" multiple>
 
@@ -1163,6 +1163,16 @@ const MODE_DISPLAY_NAMES = {
 };
 
 let cpLastGameStatus = null;
+// Minden ÚJ kör indulásakor nő - a lenti 3 mp-es késleltetett "timeout ->
+// attempting" váltás ezt ellenőrzi tűzés előtt. E NÉLKÜL a guard csak azt
+// nézte, hogy robPhase épp "collecting"-e - ami IGAZ is lehet egy vadonatúj
+// körnél is (hiszen minden friss kör "collecting"-gel indul!), így a régi,
+// már lezárt timeout eseményre beütemezett váltás 3 mp múlva simán
+// ráragadt egy közben elindult ÚJ körre, "attempting" fázisba lökve azt
+// akár egy éppen csak beérkezett, teljesen jogos új jelentkezővel is,
+// vagy üres queue esetén egy "szellem" attempting állapotot hagyva hátra.
+// Ez volt az egyik fő oka a rablás beragadásának.
+let gmRoundEpoch = 0;
 
 function renderRemoteStatus(data){
   const wordEl = document.getElementById("cpWord");
@@ -1171,13 +1181,16 @@ function renderRemoteStatus(data){
   const status = (data && data.status) || "idle";
   cpGameStatus = status;
 
+  if (status === "running" && cpLastGameStatus !== "running") gmRoundEpoch++;
+
   // Lejárt idő + van jelentkező -> a rablás "collecting"-ből "attempting"-be vált,
   // de csak 3 mp késleltetéssel, hogy előbb a sima "Lejárt az idő" képernyő
   // látszódjon a kivetítőn. Csak friss átmenetnél (nem minden újrarenderelésnél) indítjuk.
   const modeForRobberyCheck = (data && data.mode) || "";
   if (status === "timeout" && cpLastGameStatus !== "timeout" && robPhase === "collecting" && robQueue.length > 0 && modeForRobberyCheck !== LIP_MODE && fbDB) {
+    const epochAtSchedule = gmRoundEpoch;
     setTimeout(() => {
-      if (fbDB && robPhase === "collecting") {
+      if (fbDB && robPhase === "collecting" && gmRoundEpoch === epochAtSchedule) {
         fbDB.ref("activityRobbery").update({ currentIndex: 0, phase: "attempting" });
       }
     }, 3000);
