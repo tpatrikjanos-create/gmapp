@@ -93,9 +93,24 @@
   .cp-lip-name{margin-top:8px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .cp-lip-name.set{color:#5fd08a;}
 
+  .cp-extra-row{display:flex;gap:10px;padding:0 16px 14px;}
+  .cp-extra-btn{flex:1 1 auto;height:44px;border-radius:12px;border:1px solid var(--line);
+    background:var(--pad-hi);color:var(--text);font:inherit;font-size:13px;font-weight:800;cursor:pointer;}
+  .cp-extra-btn:active{transform:translateY(1px);}
+  .cp-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 16px;margin:0 16px 14px;background:var(--pad);border:1px solid var(--line);
+    border-radius:13px;font-size:13px;}
+  .cp-switch{position:relative;display:inline-block;width:44px;height:26px;flex:none;}
+  .cp-switch input{opacity:0;width:0;height:0;}
+  .cp-switch-track{position:absolute;inset:0;background:#2a2b33;border-radius:999px;transition:background .15s;cursor:pointer;}
+  .cp-switch-track::before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;
+    background:#fff;border-radius:50%;transition:transform .15s;}
+  .cp-switch input:checked + .cp-switch-track{background:#e84040;}
+  .cp-switch input:checked + .cp-switch-track::before{transform:translateX(18px);}
+
   /* csapatlista */
   .cp-teams{flex:1 1 auto;overflow-y:auto;padding:6px 16px 20px;}  .cp-empty{color:var(--muted);font-size:13px;text-align:center;padding:30px 10px;line-height:1.6;}
-  .cp-team{display:flex;align-items:center;gap:12px;padding:11px 12px;margin:8px 0;
+  .cp-team{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:11px 12px;margin:8px 0;
     background:var(--pad);border:1px solid var(--line);border-radius:13px;border-left-width:5px;}
   .cp-team.onturn{box-shadow:0 0 0 1px #FFC93C inset;}
   .cp-team .nm{flex:1 1 auto;min-width:0;font-size:15px;font-weight:700;
@@ -110,6 +125,14 @@
     cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;}
   .cp-pm button:active{transform:translateY(1px);}
   .cp-pm .minus{color:#ff7a5c;}
+  /* Manuális rablás + csapatbeállítás gombok - saját, teljes szélességű sorban
+     törnek, hogy a +/- gombok mellett is elférjenek keskeny telefonon. */
+  .cp-rob-btn{flex:1 1 auto;order:3;height:40px;border-radius:11px;border:1px solid rgba(255,122,92,.35);
+    background:rgba(255,122,92,.14);color:#ff7a5c;font:inherit;font-size:13px;font-weight:800;cursor:pointer;}
+  .cp-rob-btn:active{transform:translateY(1px);}
+  .cp-team-settings-btn{order:4;width:40px;height:40px;border-radius:11px;border:1px solid var(--line);
+    background:var(--pad-hi);color:var(--text);font-size:17px;cursor:pointer;}
+  .cp-team-settings-btn:active{transform:translateY(1px);}
 
   /* ===== RABLÁS képernyő ===== */
   #cpRobbery{
@@ -138,6 +161,9 @@
     display:flex;flex-direction:column;overscroll-behavior:none;
   }
 
+  /* Régi Soundboard felület (fejléc/rács/lábléc) - a GM App a Vezérlő
+     panelt mutatja mindig, ide vissza már nincs út, elrejtve marad. */
+  header,main,footer{display:none!important;}
   /* ---- Top bar ---- */
   header{position:relative;z-index:1;flex:0 0 auto;padding:12px 14px 10px;
     background:linear-gradient(180deg,var(--panel),#0d1017);border-bottom:1px solid var(--line);}
@@ -319,7 +345,6 @@
       <small id="count">0 hang</small>
     </div>
     <div class="barbtns">
-      <button class="iconbtn ctrl" id="ctrlBtn">🎮 Vezérlő</button>
       <button class="iconbtn" id="logBtn">📋 Log</button>
       <button class="iconbtn" id="editBtn">Szerkeszt</button>
       <button class="iconbtn stop" id="stopBtn">■ Mind le</button>
@@ -355,7 +380,7 @@
   <div class="grid" id="grid"></div>
 </main>
 
-<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.2</span></footer>
+<footer>Koppints = lejátszás · <b>↻</b> = loop · bal felső szám = hányszor szólt · Szerkeszt módban: hangerő + mappa hangonként · <span style="opacity:.5">v2.3</span></footer>
 
 <input type="file" id="filein" accept="audio/*,.mp3,.m4a,.ogg,.wav,.aac,.flac" multiple>
 
@@ -363,7 +388,6 @@
 <div id="ctrlPanel">
   <div class="cp-head">
     <h2>🎮 GM App</h2>
-    <button class="cp-close" id="ctrlClose">🔊 Hangok</button>
   </div>
   <div class="cp-sel">
     <div class="lbl">Kiválasztott feladvány</div>
@@ -389,9 +413,21 @@
     <div class="lbl">Kivetítő egyéni hangjainak hangereje <span class="cp-lip-hint">— a beépített effektek mindig max hangerőn szólnak</span></div>
     <div style="display:flex;align-items:center;gap:10px;padding:0 2px;">
       <span style="font-size:16px">🔉</span>
-      <input type="range" id="cpProjectorVol" min="0" max="1" step="0.01" value="0.05" style="flex:1">
+      <input type="range" id="cpProjectorVol" min="0" max="0.15" step="0.01" value="0.05" style="flex:1">
       <span id="cpProjectorVolPct" style="font-size:12px;color:var(--muted);min-width:34px;text-align:right">5%</span>
     </div>
+  </div>
+
+  <div class="cp-extra-row">
+    <button class="cp-extra-btn" id="cpWinnerBtn">🏆 Győztes!</button>
+    <button class="cp-extra-btn" id="cpStopSoundsBtn">🔇 Hangeffektek állj</button>
+  </div>
+  <div class="cp-toggle-row">
+    <span>Rablás letiltása <span class="cp-lip-hint">— vészhelyzeti kikapcsoló, ha a Rabló App beragad</span></span>
+    <label class="cp-switch">
+      <input type="checkbox" id="cpRobberyDisabled">
+      <span class="cp-switch-track"></span>
+    </label>
   </div>
 
   <div class="cp-teams" id="cpTeams">
@@ -777,6 +813,7 @@ function initFirebase(){
     attachRemoteListeners();
     initProjectorVolume();
     initLogPanel();
+    initRobberyDisableToggle();
   }catch(e){ console.error("Firebase init hiba:",e); setDot(false); }
 }
 
@@ -815,6 +852,36 @@ function initLogPanel(){
 /* GM App saját eseményeinek naplózása (pl. új játék indítás, hangerő állítás) */
 function pushLog(text){
   try{ if(fbDB) fbDB.ref("activityLog").push({ ts: Date.now(), text: String(text) }); }catch(e){}
+}
+
+/* Győztes! gomb - a kivetítő jeleníti meg a győztes-overlay-t. */
+document.getElementById("cpWinnerBtn").addEventListener("click", ()=>{
+  if(!fbDB) return;
+  fbDB.ref("activityControl/winnerSignal").set(Date.now());
+  pushLog("🏆 Győztes hirdetés indítva (GM App gombjából)");
+});
+
+/* Hangeffektek állj - azonnal leállítja a kivetítőn szóló egyéni hangokat. */
+document.getElementById("cpStopSoundsBtn").addEventListener("click", ()=>{
+  if(!fbDB) return;
+  fbDB.ref("activityControl/stopSoundsSignal").set(Date.now());
+});
+
+/* Rablás letiltása - vészhelyzeti kikapcsoló, ha a Rabló App/jelzései beragadnak. */
+let suppressRobberyTogglePush = false;
+document.getElementById("cpRobberyDisabled").addEventListener("change", function(){
+  if(suppressRobberyTogglePush || !fbDB) return;
+  fbDB.ref("activityControl/robberyDisabled").set(this.checked);
+  pushLog(this.checked ? "🚫 Rablás letiltva (GM App)" : "✅ Rablás újra engedélyezve (GM App)");
+});
+function initRobberyDisableToggle(){
+  const cb = document.getElementById("cpRobberyDisabled");
+  if(!cb || !fbDB) return;
+  fbDB.ref("activityControl/robberyDisabled").on("value", s=>{
+    suppressRobberyTogglePush = true;
+    cb.checked = !!s.val();
+    suppressRobberyTogglePush = false;
+  });
 }
 
 /* Kivetítő egyéni (feltöltött) hangjainak távoli hangereje */
@@ -1029,9 +1096,44 @@ function renderRemoteTeams(data){
     plus.onclick = () => sendScore(t.id, +1);
     pm.appendChild(minus); pm.appendChild(plus);
 
-    row.appendChild(nm); row.appendChild(sc); row.appendChild(pm);
+    // Manuális "Rablás!" gomb - ha a csapat telefonja/Rabló App-ja beragadt
+    // vagy nincs nála, a GM ezzel tudja jelezni helyette, hogy rabolna.
+    const rob = document.createElement("button");
+    rob.className = "cp-rob-btn"; rob.textContent = "🏴 Rablás!";
+    rob.title = "Rablás-jelentkezés elküldése ennek a csapatnak a nevében";
+    rob.onclick = () => sendManualRobbery(t.id, t.name);
+
+    // Csapatbeállítások (átnevezés/törlés) - hogy ne kelljen újraindítani az
+    // egész játékot, ha valaki játék közben elmegy.
+    const settings = document.createElement("button");
+    settings.className = "cp-team-settings-btn"; settings.textContent = "⚙";
+    settings.title = "Csapat átnevezése / törlése";
+    settings.onclick = () => openTeamSettings(t.id, t.name);
+
+    row.appendChild(nm); row.appendChild(sc); row.appendChild(pm); row.appendChild(rob); row.appendChild(settings);
     box.appendChild(row);
   });
+}
+
+function sendManualRobbery(teamId, teamName){
+  if(!fbDB) return;
+  fbDB.ref("activityRobbery/queue").push({ teamId: String(teamId), teamName: teamName || ("#"+teamId), ts: Date.now(), manual: true })
+      .catch(err => console.error("Manuális rablás küldési hiba:", err));
+  pushLog(`🏴 Manuális rablás-jelentkezés: ${teamName || teamId} (GM App)`);
+}
+
+function openTeamSettings(teamId, currentName){
+  const action = prompt(`"${currentName}" csapat - írj be új nevet az átnevezéshez, vagy írd be, hogy TÖRLÉS a csapat eltávolításához:`, currentName);
+  if(action === null) return;
+  const trimmed = action.trim();
+  if(!trimmed) return;
+  if(!fbDB) return;
+  if(trimmed.toUpperCase() === "TÖRLÉS" || trimmed.toUpperCase() === "TORLES"){
+    if(!confirm(`Biztos törlöd a(z) "${currentName}" csapatot? Ez nem vonható vissza.`)) return;
+    fbDB.ref("activityControl/teamCommandQueue").push({ type: "delete", teamId: String(teamId), ts: Date.now() });
+  } else {
+    fbDB.ref("activityControl/teamCommandQueue").push({ type: "rename", teamId: String(teamId), newName: trimmed, ts: Date.now() });
+  }
 }
 
 let cpCurrentMode = "";
@@ -1122,13 +1224,6 @@ function sendStartSignal(){
       .catch(err => console.error("[GM App] Indító jel hiba:", err));
 }
 
-document.getElementById("ctrlBtn").addEventListener("click", () => {
-  document.getElementById("ctrlPanel").classList.add("open");
-  keepAwake();
-});
-document.getElementById("ctrlClose").addEventListener("click", () => {
-  document.getElementById("ctrlPanel").classList.remove("open");
-});
 document.getElementById("cpStart").addEventListener("click", sendStartSignal);
 document.getElementById("cpSolvedBtn").addEventListener("click", function(){
   signalSolved();
